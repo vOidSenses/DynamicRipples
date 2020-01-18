@@ -4,26 +4,17 @@ using UnityEngine;
 using UnityEngine.Rendering;
 
 [ExecuteInEditMode]
-public class RipplesCommandBuffer : MonoBehaviour {
-
+public class RipplesCommandBuffer : MonoBehaviour
+{
+	public static RipplesCommandBuffer instance;
+	[HideInInspector]
+	public bool bufferIsOn = false;
 	public List<ParticleSystem> particles;
 	private Dictionary<Camera, CommandBuffer> m_Cameras = new Dictionary<Camera, CommandBuffer>();
-
+	public bool refreshBuffer;
 	public int texSize = 2048;
 	public float rippleDist = 64.0f;
 	public RenderTexture targetTex;
-
-	void Start()
-	{
-		CreateTexture();
-	}
-
-	void CreateTexture()
-	{
-		targetTex = new RenderTexture( texSize, texSize, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear );
-		targetTex.Create();
-		Shader.SetGlobalTexture( "_DynamicRippleTexture", targetTex );
-	}
 
 	// Remove command buffers from all cameras we added into
 	private void Cleanup()
@@ -40,14 +31,19 @@ public class RipplesCommandBuffer : MonoBehaviour {
 
 	public void OnEnable()
 	{
-		Shader.EnableKeyword( "DYNAMIC_RIPPLES_ON" );
+		instance = this;
 		Cleanup();
+		CreateTexture();
+		Shader.EnableKeyword( "DYNAMIC_RIPPLES_ON" );
+		bufferIsOn = true;
 	}
 
 	public void OnDisable()
 	{
+		bufferIsOn = false;
 		Shader.DisableKeyword( "DYNAMIC_RIPPLES_ON" );
 		Cleanup();
+		instance = null;
 	}
 
 	public void OnWillRenderObject()
@@ -58,14 +54,19 @@ public class RipplesCommandBuffer : MonoBehaviour {
 			Cleanup();
 			return;
 		}
-
 		var cam = Camera.current;
 		if( !cam )
 			return;
 
 		CommandBuffer buf = null;
-		if( m_Cameras.ContainsKey( cam ) )
+
+		if( !refreshBuffer && m_Cameras.ContainsKey( cam ) )
 			return;
+
+		if( m_Cameras.ContainsKey( cam ) )
+		{
+			cam.RemoveCommandBuffer( CameraEvent.AfterSkybox, m_Cameras[ cam ] );
+		}
 
 		buf = new CommandBuffer();
 		buf.SetRenderTarget( targetTex );
@@ -76,8 +77,14 @@ public class RipplesCommandBuffer : MonoBehaviour {
 		Matrix4x4 P = Matrix4x4.Ortho( -32, 32, -32, 32, -1, -500 );
 		buf.SetViewProjectionMatrices( V, P );
 
-		for( int i = 0; i < particles.Count; i++ )
+		for( int i = particles.Count - 1; i >= 0; i-- )
 		{
+			if( particles[ i ] == null )
+			{
+				particles.RemoveAt( i );
+				continue;
+			}
+
 			ParticleSystemRenderer pr = particles[ i ].GetComponent<ParticleSystemRenderer>();
 			buf.DrawRenderer( pr, pr.sharedMaterial );
 		}
@@ -86,5 +93,13 @@ public class RipplesCommandBuffer : MonoBehaviour {
 
 		Shader.SetGlobalMatrix( "_DynamicRippleMatrix", V );
 		Shader.SetGlobalFloat( "_DynamicRippleSize", 32 );
+	}
+
+	void CreateTexture()
+	{
+		targetTex = new RenderTexture( texSize, texSize, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear );
+		targetTex.Create();
+
+		Shader.SetGlobalTexture( "_DynamicRippleTexture", targetTex );
 	}
 }
